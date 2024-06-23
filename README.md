@@ -83,4 +83,82 @@ uvicorn main:app --reload
 ### `CreateCorrectAnswerNote`
 이 함수는 틀린 답안에 대한 유사 문제를 포함하는 문서를 생성합니다.
 
+---
+
+### 주요 기능
+
+#### 1. `MakeStudentInfo`
+
+PDF 파일에서 텍스트를 추출하고 문제 세부 사항 및 학생 답안을 포함하는 JSON 객체를 생성합니다.
+
+**매개변수:**
+- `Question_pdf`: 시험 문제가 포함된 PDF 파일
+- `Answer_json`: 학생의 답안을 포함하는 JSON 데이터
+
+**반환값:**
+- 문제 세부 사항 및 학생 답안을 포함하는 JSON 객체
+
+#### 2. `MakeScoreCommentary`
+
+학생 답안과 정답을 바탕으로 점수 해설을 포함하는 JSON 객체를 생성합니다.
+
+**매개변수:**
+- `QuestionAnswerJson`: 문제 세부 사항 및 학생 답안을 포함하는 JSON 데이터
+
+**반환값:**
+- 점수 해설 및 요약을 포함하는 JSON 객체
+
+#### 3. `CreateMemorizationBookAddCommentary`
+
+해설이 추가된 암기장을 생성합니다.
+
+**매개변수:**
+- `QuestionAnswer_json`: 문제 세부 사항 및 학생 답안을 포함하는 JSON 데이터
+- `AnswerCommentary_json`: 점수 해설 및 요약을 포함하는 JSON 데이터
+- `Output_path`: 출력 문서가 저장될 경로
+
+#### 4. `CreateCorrectAnswerNote`
+
+관련 문제와 해설이 포함된 정답 노트를 생성합니다.
+
+**매개변수:**
+- `QuestionAnswer_json`: 문제 세부 사항 및 학생 답안을 포함하는 JSON 데이터
+- `AnswerCommentary_json`: 점수 해설 및 요약을 포함하는 JSON 데이터
+- `Output_path`: 출력 문서가 저장될 경로
+
+### 예제 사용법
+
+다음은 이러한 함수를 사용하는 예제입니다:
+
+```python
+from your_module import MakeStudentInfo, MakeScoreCommentary, CreateMemorizationBookAddCommentary, CreateCorrectAnswerNote
+
+# 1단계: PDF에서 학생 정보와 답안을 추출
+response1 = MakeStudentInfo(Question_pdf="path/to/your/Question.pdf",
+                            Answer_json="path/to/your/answers.json")
+
+# 2단계: 추출된 데이터를 바탕으로 점수 해설 생성
+response2 = MakeScoreCommentary(QuestionAnswerJson=response1)
+
+# 3단계: 해설이 추가된 암기장 생성
+CreateMemorizationBookAddCommentary(QuestionAnswer_json=response1,
+                                    AnswerCommentary_json=response2,
+                                    Output_path="path/to/your/output_memorization_book.docx")
+
+# 4단계: 정답 노트 생성
+CreateCorrectAnswerNote(QuestionAnswer_json=response1,
+                        AnswerCommentary_json=response2,
+                        Output_path="path/to/your/output_correct_answer_note.docx")
+```
+
+### 코드 실행
+
+Python 스크립트를 실행하여 코드를 실행할 수 있습니다. 필요한 파일이 준비되어 있고 Dropbox 및 OpenAI API 키가 `.env` 파일에 올바르게 설정되어 있는지 확인하십시오.
+
+
+## 결론
+
+이 프로젝트는 시험 문제와 학생 답안을 처리하고, 유용한 보고서를 생성하며, 클라우드 스토리지와 통합하는 포괄적인 워크플로를 제공합니다. 특정 사용 사례에 맞게 기능을 커스터마이즈하고 확장할 수 있습니다.
+
+
 
