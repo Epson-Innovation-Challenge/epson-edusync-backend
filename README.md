@@ -1,5 +1,6 @@
 # FastAPI
 
+![로고](https://www.google.com/url?sa=i&url=https%3A%2F%2Ftech.osci.kr%2Ffastapi-%25ED%258C%258C%25EC%259D%25B4%25EC%258D%25AC%25EC%259C%25BC%25EB%25A1%259C-%25EA%25B0%2584%25EB%258B%25A8%25ED%2595%2598%25EA%25B2%258C-%25EC%259B%25B9-api-%25EB%25A7%258C%25EB%2593%25A4%25EA%25B8%25B0%2F&psig=AOvVaw01la6dxO5fCXsBg5zSUUlg&ust=1719211339098000&source=images&cd=vfe&opi=89978449&ved=0CBEQjRxqFwoTCKigkruP8YYDFQAAAAAdAAAAABAE)
 ## 개요
 
 이 FastAPI 애플리케이션은 교육 문서와 학생 답안을 처리하는 두 가지 주요 엔드포인트를 제공합니다. Dropbox와 연동하여 PDF 파일을 다운로드하고 이를 처리하여 점수 보고서와 암기장, 오답노트, 유사문제를 생성합니다.
