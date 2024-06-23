@@ -1,47 +1,58 @@
-import os
-from datetime import datetime
-from typing import List
-
 import dropbox
 import fitz  # PyMuPDF
-import json
-import io
-from dropbox.files import WriteMode
-from reportlab.lib.pagesizes import letter
-from reportlab.pdfgen import canvas
-from dotenv import load_dotenv
+from langchain_openai import ChatOpenAI
+from langchain_community.document_loaders import UnstructuredFileLoader
+from langchain.text_splitter import CharacterTextSplitter
+from langchain.embeddings import CacheBackedEmbeddings
+from langchain_openai import OpenAIEmbeddings
+from langchain_community.vectorstores import Chroma, FAISS
+from langchain.storage import LocalFileStore
+from langchain.chains import RetrievalQA
+from langchain.prompts import ChatPromptTemplate
+from langchain.schema.runnable import RunnablePassthrough
+from langchain.prompts.chat import (
+    ChatPromptTemplate,
+    HumanMessagePromptTemplate,
+)
+from langchain.memory import ConversationBufferMemory
+from langchain.agents import create_openai_functions_agent, AgentExecutor
+from langchain_community.document_loaders import PyPDFLoader
+from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 
+import json
+import os
+from langchain.prompts import PromptTemplate
+from langchain_core.output_parsers import JsonOutputParser
+from langchain_core.pydantic_v1 import BaseModel, Field
+from typing import List
 from docx import Document
-from docx.shared import Pt, Inches
+from docx.shared import Pt
 from docx.oxml.ns import qn
 from docx.oxml import OxmlElement
 from docx.enum.text import WD_PARAGRAPH_ALIGNMENT
-
-import openai
-
-from langchain_openai import ChatOpenAI, OpenAIEmbeddings
-from langchain_community.document_loaders import UnstructuredFileLoader, PyPDFLoader
-from langchain.text_splitter import CharacterTextSplitter, RecursiveCharacterTextSplitter
-from langchain.embeddings import CacheBackedEmbeddings
-from langchain_community.vectorstores import Chroma, FAISS
-from langchain.storage import LocalFileStore
-
-from langchain.prompts import ChatPromptTemplate, PromptTemplate
-from langchain.schema.runnable import RunnablePassthrough
-from langchain.agents import create_openai_functions_agent, AgentExecutor
-from langchain_core.output_parsers import JsonOutputParser
-from langchain_core.pydantic_v1 import BaseModel, Field
+from datetime import datetime
+from docx.shared import Inches
 from langchain.tools.retriever import create_retriever_tool
 from langchain_community.agent_toolkits.load_tools import load_tools
 from langchain import hub
 from langchain_community.chat_message_histories import ChatMessageHistory
 from langchain_core.runnables.history import RunnableWithMessageHistory
+import io
+from dropbox import Dropbox
+from dropbox.files import WriteMode
+from reportlab.lib.pagesizes import letter
+from reportlab.pdfgen import canvas
 
+import openai
+from dotenv import load_dotenv
 load_dotenv()
-openai_api_key = os.environ.get('OPENAI_API_KEY')
-# Set your Dropbox access token and folder path
-ACCESS_TOKEN = "Epson_API"
 
+openai_api_key = os.environ.get('OPENAI_API_KEY')
+openai_api_key2 = os.environ.get('OPENAI_API_KEY2')
+
+# Set your Dropbox access token and folder path
+ACCESS_TOKEN = "EpsonAPI"
 
 def MakeStudentInfo(Question_pdf, Answer_json):
     #document = fitz.open(Question_pdf)
@@ -109,16 +120,9 @@ def MakeStudentInfo(Question_pdf, Answer_json):
     # JSON 파일로 저장
     with open('./QuestionAnswer.json', 'w', encoding='utf-8') as json_file:
         json.dump(response, json_file, ensure_ascii=False, indent=4)
-
+    
+    print(1)
     return response
-
-# Pydantic 모델 정의
-class CommentaryResponse(BaseModel):
-    Number: int = Field(description="문제 번호")
-    StudentAnswer: int = Field(description="학생이 제출한 정답")
-    CorrectAnswer: int = Field(description="실제 정답")
-    IsCorrect: bool = Field(description="정답 여부")
-    CommentarySummarize: List[str] = Field(description="문제 해설 3줄 요약")
 
 def MakeScoreCommentary(QuestionAnswerJson):
 
@@ -127,6 +131,13 @@ def MakeScoreCommentary(QuestionAnswerJson):
         # JSON 파일 읽기 및 파싱
         #data = json.load(file)
     data = QuestionAnswerJson
+        # Pydantic 모델 정의
+    class CommentaryResponse(BaseModel):
+        Number: int = Field(description="문제 번호")
+        StudentAnswer: int = Field(description="학생이 제출한 정답")
+        CorrectAnswer: int = Field(description="실제 정답")
+        IsCorrect: bool = Field(description="정답 여부")
+        CommentarySummarize: List[str] = Field(description="문제 해설 3줄 요약")
     
     cache_dir = LocalFileStore("./.cache/")
 
@@ -146,9 +157,9 @@ def MakeScoreCommentary(QuestionAnswerJson):
     vectorstore = FAISS.from_documents(docs, cached_embeddings)
 
     retriver = vectorstore.as_retriever()
-
     
-    llm = ChatOpenAI(openai_api_key=openai_api_key, 
+    
+    llm = ChatOpenAI(openai_api_key=openai_api_key2, 
                  model= "gpt-4o", 
                  temperature=0.1)
     structured_llm = llm.with_structured_output(CommentaryResponse)
@@ -214,6 +225,7 @@ def MakeScoreCommentary(QuestionAnswerJson):
     with open('./AnswerCommentary.json', 'w', encoding='utf-8') as json_file:
         json.dump(response_list, json_file, ensure_ascii=False, indent=4)
     
+    print(2)
     return response_list
 
 
@@ -398,7 +410,7 @@ def CreateCorrectAnswerNote(QuestionAnswer_json, AnswerCommentary_json, Output_p
         CorrectAnswer: int = Field(description="문제 정답")
         CommentarySummarize: List[str] = Field(description="문제 해설 3줄 요약")
 
-    llm = ChatOpenAI(model="gpt-4-turbo", temperature=0.1)
+    llm = ChatOpenAI(openai_api_key=openai_api_key2, model="gpt-4-turbo", temperature=0.1)
     structured_llm = llm.with_structured_output(AgentResponse)
     # parser가 get_format_instructions를 통해 스키마 생성, LLM 출력을 Json 형식으로 파싱
     parser = JsonOutputParser(pydantic_object=AgentResponse)
