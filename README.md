@@ -48,25 +48,38 @@ uvicorn main:app --reload
 - 정답 여부
 - 각 문제에 대한 요약 해설
 
-### 2. `POST /CreateMemorizationBookAddCommentary`
+### 2. `POST /PostMemorizationBookAddCommentary`
 
 #### 설명:
 이 엔드포인트는 다음과 같은 다양한 학습 자료를 생성합니다:
 - 오답 노트 (Output_path1)
 - 정답 및 해설이 포함된 암기장 (Output_path2)
-- 유사 문제 문서 (Output_path3)
 
 #### 요청 매개변수:
 - `Output_path1` (str): 오답 노트 문서 경로 (기본값: `/study/오답노트.docx`).
 - `Output_path2` (str): 암기장 문서 경로 (기본값: `/memory/암기장.docx`).
-- `Output_path3` (str): 유사 문제 문서 경로 (기본값: `/gen/유사문제.docx`).
 
 #### 예시 요청:
 ```json
 {
   "Output_path1": "/study/error_note.docx",
-  "Output_path2": "/memory/memorization_book.docx",
-  "Output_path3": "/gen/similar_problems.docx"
+  "Output_path2": "/memory/memorization_book.docx"
+}
+```
+
+### 3. `POST /PostCreateCorrectAnswerNote`
+
+#### 설명:
+이 엔드포인트는 다음과 같은 유사 문제 자료를 생성합니다:
+- 유사 문제 문서 (Output_path)
+
+#### 요청 매개변수:
+- `Output_path` (str): 유사 문제 문서 경로 (기본값: `/gen/유사문제.docx`).
+
+#### 예시 요청:
+```json
+{
+  "Output_path": "/gen/similar_problems.docx"
 }
 ```
 
