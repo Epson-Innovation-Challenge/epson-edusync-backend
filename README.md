@@ -16,7 +16,7 @@
 
 FastAPI 서버를 시작하려면 다음 명령어를 실행하세요:
 ```bash
-uvicorn main:backend --reload
+uvicorn backend:app --reload
 ```
 
 ## API 엔드포인트
