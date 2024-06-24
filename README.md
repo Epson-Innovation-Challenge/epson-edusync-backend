@@ -9,13 +9,14 @@
  **필요한 패키지 설치:**
    ```bash
    pip install fastapi uvicorn dropbox pymupdf pydantic
+   pip install -r requirements.txt
    ```
 
 ## 애플리케이션 실행
 
 FastAPI 서버를 시작하려면 다음 명령어를 실행하세요:
 ```bash
-uvicorn main:app --reload
+uvicorn main:backend --reload
 ```
 
 ## API 엔드포인트
