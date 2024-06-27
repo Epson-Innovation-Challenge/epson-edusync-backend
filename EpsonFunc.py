@@ -14,6 +14,7 @@ from langchain.prompts.chat import (
     ChatPromptTemplate,
     HumanMessagePromptTemplate,
 )
+from langchain.agents.format_scratchpad import format_to_openai_function_messages
 from langchain.memory import ConversationBufferMemory
 from langchain.agents import create_openai_functions_agent, AgentExecutor
 from langchain_community.document_loaders import PyPDFLoader
@@ -44,6 +45,7 @@ from dropbox.files import WriteMode
 from reportlab.lib.pagesizes import letter
 from reportlab.pdfgen import canvas
 
+from langchain_core.agents import AgentActionMessageLog, AgentFinish
 import openai
 from dotenv import load_dotenv
 load_dotenv()
@@ -52,7 +54,8 @@ openai_api_key = os.environ.get('OPENAI_API_KEY')
 openai_api_key2 = os.environ.get('OPENAI_API_KEY2')
 
 # Set your Dropbox access token and folder path
-ACCESS_TOKEN = "EpsonAPI"
+ACCESS_TOKEN = ""
+
 
 def MakeStudentInfo(Question_pdf, Answer_json):
     #document = fitz.open(Question_pdf)
@@ -72,9 +75,6 @@ def MakeStudentInfo(Question_pdf, Answer_json):
     with open(Question_pdf_file, 'r', encoding='utf-8') as file:
         extracted_text = file.read()
 
-    # JSON 파일 읽기
-    #with open(Answer_json, 'r', encoding='utf-8') as file:
-    #    json_data = json.load(file)
 
     # Pydantic 모델 정의
     class StudentResponse(BaseModel):
@@ -112,7 +112,6 @@ def MakeStudentInfo(Question_pdf, Answer_json):
     - StudentAnswer: 3"""
 
     parser = JsonOutputParser(pydantic_object=StudentResponse)
-    #format_instructions = parser.get_format_instructions()
     chat_prompt_template = ChatPromptTemplate.from_messages([human_message_prompt])
     chain = chat_prompt_template | llm | parser
     response = chain.invoke({"extracted_text": extracted_text, 
@@ -121,15 +120,11 @@ def MakeStudentInfo(Question_pdf, Answer_json):
     with open('./QuestionAnswer.json', 'w', encoding='utf-8') as json_file:
         json.dump(response, json_file, ensure_ascii=False, indent=4)
     
-    print(1)
+    
     return response
 
 def MakeScoreCommentary(QuestionAnswerJson):
 
-    # JSON 파일 열기
-    #with open(QuestionAnswerJson, 'r') as file:
-        # JSON 파일 읽기 및 파싱
-        #data = json.load(file)
     data = QuestionAnswerJson
         # Pydantic 모델 정의
     class CommentaryResponse(BaseModel):
@@ -182,7 +177,6 @@ def MakeScoreCommentary(QuestionAnswerJson):
         }
         | prompt
         | structured_llm
-        #| parser
     )
     promptforAnswer = """
     위 내용은 문제, 보기, 학생이 제출한 답안이다. 
@@ -211,7 +205,6 @@ def MakeScoreCommentary(QuestionAnswerJson):
     
     response = chain.batch(Question_list)
     
-    #print(Total_response)
     response_list = []
     for resp in response:
         resp_dict = {"Number": resp.Number,
@@ -225,7 +218,7 @@ def MakeScoreCommentary(QuestionAnswerJson):
     with open('./AnswerCommentary.json', 'w', encoding='utf-8') as json_file:
         json.dump(response_list, json_file, ensure_ascii=False, indent=4)
     
-    print(2)
+    
     return response_list
 
 
@@ -285,7 +278,7 @@ def CreateMemorizationBookAddCommentary(QuestionAnswer_json, AnswerCommentary_js
 
             doc.add_page_break()
     
-    #doc.save(Output_path)
+
     doc_stream = io.BytesIO()
     doc.save(doc_stream)
     doc_stream.seek(0)
@@ -295,8 +288,7 @@ def CreateMemorizationBookAddCommentary(QuestionAnswer_json, AnswerCommentary_js
         print(f"파일이 성공적으로 업로드되었습니다: {file_path}")
     except Exception as e:
         print(f"업로드 중 오류가 발생했습니다: {str(e)}")
-    # 단일 파일 변환
-    # 사용 예제
+
 
 def CreateMemorizationBook(QuestionAnswer_json, AnswerCommentary_json, Output_path):
     # JSON 파일 열기
@@ -365,8 +357,7 @@ def CreateMemorizationBook(QuestionAnswer_json, AnswerCommentary_json, Output_pa
         print(f"파일이 성공적으로 업로드되었습니다: {file_path}")
     except Exception as e:
         print(f"업로드 중 오류가 발생했습니다: {str(e)}")
-    # 단일 파일 변환
-    # 사용 예제
+
 
 def load_pdfs_from_folder(folder_path):
     total_split_docs = []
@@ -380,6 +371,25 @@ def load_pdfs_from_folder(folder_path):
             split_docs = loader.load_and_split(text_splitter=text_splitter)
             total_split_docs.extend(split_docs)
     return total_split_docs
+
+def parse(output):
+    # If no function was invoked, return to user
+    if "function_call" not in output.additional_kwargs:
+        return AgentFinish(return_values={"output": output.content}, log=output.content)
+
+    # Parse out the function call
+    function_call = output.additional_kwargs["function_call"]
+    name = function_call["name"]
+    inputs = json.loads(function_call["arguments"])
+
+    # If the Response function was invoked, return to the user with the function inputs
+    if name == "Response":
+        return AgentFinish(return_values=inputs, log=str(function_call))
+    # Otherwise, return an agent action
+    else:
+        return AgentActionMessageLog(
+            tool=name, tool_input=inputs, log="", message_log=[output]
+        )
 
 def CreateCorrectAnswerNote(QuestionAnswer_json, AnswerCommentary_json, Output_path):
     with open(QuestionAnswer_json, 'r') as file:
@@ -399,9 +409,13 @@ def CreateCorrectAnswerNote(QuestionAnswer_json, AnswerCommentary_json, Output_p
     # Retriever를 생성합니다.
     retriever = vector.as_retriever()
     
-    # hub에서 prompt를 가져옵니다 - 이 부분을 수정할 수 있습니다!
-    prompt = hub.pull("hwchase17/openai-functions-agent")
-
+    prompt = ChatPromptTemplate.from_messages(
+        [
+            ("system", "You are a helpful assistant"),
+            ("user", "{input}"),
+            MessagesPlaceholder(variable_name="agent_scratchpad"),
+        ]
+    )
     # Pydantic 모델 정의
     class AgentResponse(BaseModel):
         Question: str = Field(description="문제")
@@ -410,11 +424,10 @@ def CreateCorrectAnswerNote(QuestionAnswer_json, AnswerCommentary_json, Output_p
         CorrectAnswer: int = Field(description="문제 정답")
         CommentarySummarize: List[str] = Field(description="문제 해설 3줄 요약")
 
-    llm = ChatOpenAI(openai_api_key=openai_api_key2, model="gpt-4-turbo", temperature=0.1)
-    structured_llm = llm.with_structured_output(AgentResponse)
+    llm = ChatOpenAI(model="gpt-4-turbo", temperature=0)
     # parser가 get_format_instructions를 통해 스키마 생성, LLM 출력을 Json 형식으로 파싱
     parser = JsonOutputParser(pydantic_object=AgentResponse)
-
+    format_instructions = parser.get_format_instructions()
     doc = Document()
     
     for i in range(len(QuestionAnswer_json_data)):
@@ -425,64 +438,50 @@ def CreateCorrectAnswerNote(QuestionAnswer_json, AnswerCommentary_json, Output_p
                 retriever=retriever,
                 name="pdf_search",
                 # 도구에 대한 설명을 자세히 기입해야 합니다!!!
-                description= Question_Text + "와 유사한 문서를 PDF 문서에서 검색합니다."
+                description= Question_Text + "와 유사한 문서를 PDF 문서에서 검색합니다. 이외 문서는 검색하지 않는다."
             )
             search = load_tools(["ddg-search"])[0]
             # tools 리스트에 search와 retriever_tool을 추가합니다.
             tools = [search, retriever_tool]
+            llm_with_tools = llm.bind_functions([search, retriever_tool])
             
-            # llm, tools, prompt를 인자로 사용합니다.
-            agent = create_openai_functions_agent(structured_llm, tools, prompt)
-            # AgentExecutor 클래스를 사용하여 agent와 tools를 설정하고, 상세한 로그를 출력하도록 verbose를 True로 설정합니다.
-            agent_executor = AgentExecutor(agent=agent, tools=tools, verbose=True)
 
-            ########## 6. 채팅 기록을 수행하는 메모리를 추가합니다. ##########
-
-            # 채팅 메시지 기록을 관리하는 객체를 생성합니다.
-            message_history = ChatMessageHistory()
-
-            # 채팅 메시지 기록이 추가된 에이전트를 생성합니다.
-            agent_with_chat_history = RunnableWithMessageHistory(
-                agent_executor,
-                # 대부분의 실제 시나리오에서 세션 ID가 필요하기 때문에 이것이 필요합니다
-                # 여기서는 간단한 메모리 내 ChatMessageHistory를 사용하기 때문에 실제로 사용되지 않습니다
-                lambda session_id: message_history,
-                # 프롬프트의 질문이 입력되는 key: "input"
-                input_messages_key="input",
-                output_messages_key="output",
-                # 프롬프트의 메시지가 입력되는 key: "chat_history"
-                history_messages_key="chat_history"
-            )
-            response = agent_with_chat_history.invoke(
+            agent = (
                 {
-                    "input": Question_Text + """과 관련성이 높은 문제를 PDF 문서에서 찾고, 관련성이 높은 문제를 참고해서 유사한 문제를 만들어줘. 또한, 해설과 정답까지 알려줘.
-                            Generate a JSON object with the following fields:
-                            - Question: 문제
-                            - Text: 문제에 첨부된 지문
-                            - Candidate: 5가지 정답 후보
-                            - CorrectAnswer: 실제 정답
-                            - CommentarySummarize: 문제 해설 3줄 요약
-                            
-                            아래 예시처럼 작성해줘.
-                            - Question: 밑줄 친 부분이 <보기>의 ㉠~㉤에 해당하는 예로 적절한 것은?
-                            - Text: <보기>  
-                    안은문장은 한 절이 그 속에 다른 절을 문장 성분의 하나로 안고 있는 문장이다. 이때 안겨 있는 절을 안긴절이라 하며, 안긴절의 종류에는 ㉠명사절, ㉡관형사절, ㉢부사절, ㉣서술절, ㉤인용절이 있다. 명사절, 관형사절, 부사절은 주로 전성 어미를 통해 실현된다. 서술절은 전성 어미 없이 실현되며, 인용절은 조사가 붙어 실현된다.
-                            - Candidate: ["1.㉠: 그가 학교에 간다는 사실을 알고 있었다."
+                    "input": lambda x: x["input"],
+                    # Format agent scratchpad from intermediate steps
+                    "agent_scratchpad": lambda x: format_to_openai_function_messages(
+                        x["intermediate_steps"]
+                    ),
+                }
+                | prompt
+                | llm_with_tools
+                | parse
+            )
+            # AgentExecutor 클래스를 사용하여 agent와 tools를 설정하고, 상세한 로그를 출력하도록 verbose를 True로 설정합니다.
+            agent_executor = AgentExecutor(tools = tools, agent=agent, verbose=True)
+
+            
+            response = agent_executor.invoke(
+                {"input": Question_Text + """과 관련성이 높은 문제를 PDF 문서에서 찾고, 관련성이 높은 문제를 참고해서 유사한 문제를 만들어줘. 또한, 해설과 정답까지 알려줘. 결과를 json object로 출력해줘.
+                            Generate the answer in Json format.
+                            Here is the Json Output example.
+                            {"Question": "밑줄 친 부분이 <보기>의 ㉠~㉤에 해당하는 예로 적절한 것은?" ,
+                            "Text": "<보기>\n안은문장은 한 절이 그 속에 다른 절을 문장 성분의 하나로 안고 있는 문장이다. 이때 안겨 있는 절을 안긴절이라 하며, 안긴절의 종류에는 ㉠명사절, ㉡관형사절, ㉢부사절, ㉣서술절, ㉤인용절이 있다. 명사절, 관형사절, 부사절은 주로 전성 어미를 통해 실현된다. 서술절은 전성 어미 없이 실현되며, 인용절은 조사가 붙어 실현된다.", 
+                            "Candidate": ["1.㉠: 그가 학교에 간다는 사실을 알고 있었다.",
                                         "2.㉡: 내가 어제 본 영화는 매우 재미있었다.",
                                         "3.㉢: 비가 오기 전에 집에 도착해야 한다.",
                                         "4.㉣: 그녀가 도시에 도착했음을 확인했다.",
-                                        "5.㉤: 그는 내일 회사를 그만둔다고 말했다."]
-                            - CorrectAnswer: 5
-                            - CommentarySummarize: 
+                                        "5.㉤: 그는 내일 회사를 그만둔다고 말했다."],
+                            "CorrectAnswer": 5, 
+                            "CommentarySummarize": 
                             ["토론의 내용은 아동의 개인 정보 노출과 관련된 법적 보호 필요성에 초점을 맞추고 있음.",
                             "찬성 측은 개인 정보 보호의 중요성을 강조하며 법적 보호를 주장할 수 있음.",
-                            "반대 측은 개인 정보의 미숙한 권리 행사나 삭제 요구 권리의 제도화를 주장할 수 있음."]
+                            "반대 측은 개인 정보의 미숙한 권리 행사나 삭제 요구 권리의 제도화를 주장할 수 있음."]}\{format_instructions}
                             """,
-                    "output": parser
-                },
-                # 세션 ID를 설정합니다.
-                # 여기서는 간단한 메모리 내 ChatMessageHistory를 사용하기 때문에 실제로 사용되지 않습니다
-                config={"configurable": {"session_id": "MyTestSessionID"}}, 
+                            },
+                partial_variables={"format_instructions": format_instructions},
+                return_only_outputs=True,
             )
             table = doc.add_table(rows=6, cols=2)
             table.style = 'Table Grid'
@@ -507,28 +506,25 @@ def CreateCorrectAnswerNote(QuestionAnswer_json, AnswerCommentary_json, Output_p
             cell.text = "문제"
             cell = table.cell(2, 1)
             # 문제 + 지문 + 보기 5개 + 정답 + 해설
-            #print(response['output'])
-            print(response)
-            resp = json.loads(response['output'])
-            #cell.text = resp['Question'] + "\n\n" + resp['Text']
-            cell.text = resp.Question + "\n\n" + resp.Text
+            resp = response['output']
+            data = json.loads(resp)
+            cell.text = data['Question'] + "\n\n" + data['Text']
             cell = table.cell(3, 0)
             cell.text = "보기"
             cell = table.cell(3, 1)
-            cell.text = "\n".join(resp.Candidate)
+            cell.text = "\n".join(data['Candidate'])
             # 난이도
             cell = table.cell(4, 0)
             cell.text = "정답"
             cell = table.cell(4, 1)
-            cell.text = str(resp.CorrectAnswer)
+            cell.text = str(data['CorrectAnswer'])
             cell = table.cell(5, 0)
             cell.text = "해설"
             cell = table.cell(5, 1)
-            cell.text = "\n".join(resp.CommentarySummarize)
+            cell.text = "\n".join(data['CommentarySummarize'])
 
             doc.add_page_break()
     
-    #doc.save(Output_path)
     doc_stream = io.BytesIO()
     doc.save(doc_stream)
     doc_stream.seek(0)
@@ -546,153 +542,4 @@ def MakeStudentInfoScoreCommentary(Question_pdf, Answer_json):
     response2 = MakeScoreCommentary(QuestionAnswerJson = response1)
     return response2
 
-"""
-def RAG_Chat(messages, 
-             QuestionAnswer_json="./QuestionAnswer.json", 
-             AnswerCommentary_json = "./AnswerCommentary.json"):
 
-    cache_dir = LocalFileStore("./.cache/")
-
-    splitter = CharacterTextSplitter.from_tiktoken_encoder(
-        separator="\n",
-        chunk_size=600,
-        chunk_overlap=100,
-    )
-    loader = UnstructuredFileLoader("data/2024 수능특강 언어와 매체 정답.pdf")
-
-    docs = loader.load_and_split(text_splitter=splitter)
-
-    embeddings = OpenAIEmbeddings()
-
-    cached_embeddings = CacheBackedEmbeddings.from_bytes_store(embeddings, cache_dir)
-
-    vectorstore = FAISS.from_documents(docs, cached_embeddings)
-
-    retriver = vectorstore.as_retriever()
-
-    with open(QuestionAnswer_json, 'r') as file:
-        # JSON 파일 읽기 및 파싱
-        QuestionAnswer_json_data = json.load(file)
-
-    with open(AnswerCommentary_json, 'r') as file:
-        # JSON 파일 읽기 및 파싱
-        AnswerCommentary_json_data = json.load(file)
-
-    llm = ChatOpenAI(openai_api_key=openai_api_key, temperature=0.1)
-    memory = ConversationBufferMemory(memory_key="chat_history", return_messages=True, llm=llm) # BufferMemory 선언
-    for i in range(len(QuestionAnswer_json_data)):
-        if AnswerCommentary_json_data[i]['IsCorrect'] == False:
-
-            memory.chat_memory.add_user_message(f"학생은 다음 문제를 틀렸다. 문제: {QuestionAnswer_json_data[i]['Question']}" 
-                                                + "\n\n" + f"{QuestionAnswer_json_data[i]['Text']}"  
-                                                + f"{QuestionAnswer_json_data[i]['Candidate']})"
-                                                + f"학생이 제출한 정답: {AnswerCommentary_json_data[i]['StudentAnswer']}"
-                                                + f"실제 정답: {AnswerCommentary_json_data[i]['CorrectAnswer']}") # 유저 메시지 추가
-            # memory.chat_memory.add_ai_message("안녕하세요 무엇을 도와드릴까요?") # ai 메시지 추가
-    prompt = ChatPromptTemplate.from_messages(
-    [
-        ("system", "You are a helpful chatbot"),
-        MessagesPlaceholder(variable_name="chat_history"),
-        ("human", "{input}"),
-    ]
-)
-"""
-    #memory.load_memory_variables({}) # 메모리 불러올 때, 빈 dict 넣기
-    # {'history': 'Human: 안녕\nAI: 안녕하세요 무엇을 도와드릴까요?'}
-
-    
-"""
-response1 = MakeStudentInfo(Question_pdf = "Epson-data/언어와매체10문제.pdf",
-                Answer_json = "Epson-data/answers.json",
-                Output_path = "Epson-data/QuestionAnswer.json")
-
-response2 = MakeScoreCommentary(QuestionAnswerJson = "Epson-data/QuestionAnswer.json",
-                               Output_path="Epson-data/AnswerCommentary.json")
-
-#response = MakeStudentInfoScoreCommentary(Question_pdf = "Epson-data/언어와매체10문제.pdf",
-#                               Answer_json = "Epson-data/answers.json")
-
-CreateMemorizationBookAddCommentary(QuestionAnswer_json="Epson-data/QuestionAnswer.json",
-                       AnswerCommentary_json="Epson-data/AnswerCommentary.json",
-                       Output_path="/test/암기장.docx") # 원문제 + 정답 + 해설
-      
-CreateCorrectAnswerNote(QuestionAnswer_json="Epson-data/QuestionAnswer.json",
-                       AnswerCommentary_json="Epson-data/AnswerCommentary.json",
-                       Output_path="/test/유사문제.docx") # 유사문제 생성
-
-CreateMemorizationBook(QuestionAnswer_json="Epson-data/QuestionAnswer.json",
-                       AnswerCommentary_json="Epson-data/AnswerCommentary.json",
-                       Output_path="/test/오답노트.docx") # 원문제만
-
-
-
-
-# Initialize Dropbox client
-
-def PostMakeStudentInfoScoreCommentary(data):
-    dbx = dropbox.Dropbox(ACCESS_TOKEN)
-    file_path = f"/test/{data['document']}"
-    _, res = dbx.files_download(file_path)
-
-    with open("temp.pdf", "wb") as f:
-        f.write(res.content)
-    doc = fitz.open("temp.pdf")
-    
-    #summary = finetuned_summarize(input_text.text)
-    result = MakeStudentInfoScoreCommentary(Question_pdf=doc,
-                                            Answer_json=data["submit"])
-    return result
-
-
-
-
-
-data = {
-    "document": "언어와 매체 10문제.pdf",
-    "submit": [
-        {
-            "question_num": 1,
-            "answer": "1"
-        },
-        {
-            "question_num": 2,
-            "answer": "2"
-        },
-        {
-            "question_num": 3,
-            "answer": "3"
-        },
-        {
-            "question_num": 4,
-            "answer": "4"
-        },
-        {
-            "question_num": 5,
-            "answer": "5"
-        },
-        {
-            "question_num": 6,
-            "answer": "1"
-        },
-        {
-            "question_num": 7,
-            "answer": "2"
-        },
-        {
-            "question_num": 8,
-            "answer": "3"
-        },
-        {
-            "question_num": 9,
-            "answer": "4"
-        },
-        {
-            "question_num": 10,
-            "answer": "5"
-        }
-    ]
-}
-
-result = PostMakeStudentInfoScoreCommentary(data)
-print(result)
-"""
